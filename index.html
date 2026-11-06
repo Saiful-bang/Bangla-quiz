@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>বাংলা কুইজ পরীক্ষা</title>
+<style>
+:root{font-family:system-ui,"Noto Sans Bengali",sans-serif;color:#172033;background:#f4f6fb}
+body{margin:0;padding:16px}.wrap{max-width:760px;margin:auto}
+.card{background:white;border-radius:16px;padding:18px;margin:12px 0;box-shadow:0 2px 12px #17203312}
+h1{font-size:1.45rem;margin:4px 0 8px}h2{font-size:1.15rem}
+button,.btn{border:0;border-radius:10px;padding:11px 15px;background:#2357d8;color:white;font-size:1rem;cursor:pointer}
+button.secondary{background:#e8edfa;color:#17336e}
+input{max-width:100%}.muted{color:#5e687b;font-size:.93rem}
+label{display:block;padding:10px;border:1px solid #e1e5ee;border-radius:10px;margin:8px 0}
+label:has(input:checked){border-color:#2357d8;background:#f0f4ff}
+.top{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-weight:700}
+.hidden{display:none}.question{font-size:1.15rem;line-height:1.7}
+.good{color:#087a42}.bad{color:#b42318}
+textarea{width:100%;min-height:95px;box-sizing:border-box;padding:10px;border:1px solid #ccd3e0;border-radius:8px}
+</style>
+
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#176b4d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js').catch(console.error);
+  });
+}
+</script>
+
+</head>
+<body><div class="wrap">
+<div class="card">
+<h1>বাংলা কুইজ পরীক্ষা</h1>
+<p class="muted">নিজের CSV প্রশ্ন-ফাইল যোগ করে কুইজ দাও। ইন্টারনেট ছাড়াও ব্রাউজারে চলবে।</p>
+</div>
+<section id="setup" class="card">
+<h2>১. প্রশ্নের ফাইল যোগ করো</h2>
+<p>CSV ফাইলে কলামগুলো হবে: <b>question, option1, option2, option3, option4, answer</b>। Answer ঘরে 1–4 লিখবে।</p>
+<input type="file" id="file" accept=".csv,text/csv">
+<p class="muted" id="loadmsg">এখনও কোনো ফাইল যোগ করা হয়নি।</p>
+<hr>
+<h2>২. পরীক্ষার সেটিংস</h2>
+<p>প্রশ্ন সংখ্যা <input id="count" type="number" min="1" value="25" style="width:65px">　
+সময় (মিনিট) <input id="mins" type="number" min="1" value="20" style="width:65px"></p>
+<p class="muted">সঠিক উত্তর: +১ | ভুল উত্তর: −০.২৫ | উত্তর না দিলে: ০</p>
+<button id="start" disabled>পরীক্ষা শুরু</button>
+</section>
+<section id="quiz" class="card hidden">
+<div class="top"><span id="progress"></span><span id="timer">২০:০০</span></div>
+<div id="qtext" class="question"></div><div id="choices"></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+<button class="secondary" id="prev">আগের প্রশ্ন</button><button class="secondary" id="next">পরের প্রশ্ন</button><button id="submit">পরীক্ষা জমা দাও</button>
+</div>
+<p class="muted">উত্তর না দিলে ফাঁকা থাকবে; শেষে জমা দিতে পারবে।</p>
+</section>
+<section id="result" class="card hidden"></section>
+</div>
+<script>
+let questions=[], deck=[], answers=[], pos=0, seconds=1200, clock=null, done=false;
+const $=id=>document.getElementById(id);
+function parseCSV(text){
+  const rows=[]; let row=[], field='', quoted=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i], n=text[i+1];
+    if(c==='"' && quoted && n==='"'){field+='"';i++;}
+    else if(c==='"'){quoted=!quoted;}
+    else if(c===',' && !quoted){row.push(field);field='';}
+    else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&n==='\n')i++;row.push(field);if(row.some(x=>x.trim()))rows.push(row);row=[];field='';}
+    else field+=c;
+  }
+  row.push(field);if(row.some(x=>x.trim()))rows.push(row);
+  return rows;
+}
+$('file').addEventListener('change', async e=>{
+  const f=e.target.files[0]; if(!f)return;
+  try{
+    let rows=parseCSV((await f.text()).replace(/^\uFEFF/,''));
+    const head=rows.shift().map(x=>x.trim().toLowerCase());
+    const idx=name=>head.indexOf(name);
+    const required=['question','option1','option2','option3','option4','answer'];
+    if(required.some(x=>idx(x)<0))throw Error('CSV-এর প্রথম সারিতে প্রয়োজনীয় header নেই।');
+    questions=rows.map(r=>({q:r[idx('question')],o:[1,2,3,4].map(i=>r[idx('option'+i)]),a:Number(r[idx('answer')])}))
+      .filter(x=>x.q&&x.o.every(Boolean)&&[1,2,3,4].includes(x.a));
+    if(!questions.length)throw Error('বৈধ প্রশ্ন পাওয়া যায়নি। Answer ঘরে 1, 2, 3 বা 4 দাও।');
+    $('loadmsg').textContent=`${questions.length}টি প্রশ্ন যোগ হয়েছে।`;
+    $('start').disabled=false;
+  }catch(err){$('loadmsg').textContent=err.message;questions=[];$('start').disabled=true;}
+});
+function showQuestion(){
+  const q=deck[pos];$('progress').textContent=`প্রশ্ন ${pos+1}/${deck.length}`;
+  $('qtext').textContent=q.q;$('choices').innerHTML='';
+  q.o.forEach((op,i)=>{
+    const l=document.createElement('label'), inp=document.createElement('input');
+    inp.type='radio';inp.name='answer';inp.value=i+1;inp.checked=answers[pos]===i+1;
+    inp.addEventListener('change',()=>answers[pos]=i+1);
+    l.append(inp,document.createTextNode(' '+(i+1)+'. '+op));$('choices').append(l);
+  });
+  $('prev').disabled=pos===0;$('next').disabled=pos===deck.length-1;
+}
+$('start').onclick=()=>{
+  const n=Math.max(1,Number($('count').value)||25);
+  if(n>questions.length){$('loadmsg').textContent=`ফাইলে ${questions.length}টি প্রশ্ন আছে; ${n}টি চাওয়া হয়েছে।`;return;}
+  deck=[...questions].sort(()=>Math.random()-.5).slice(0,n);
+  answers=Array(n).fill(null);pos=0;seconds=Math.max(1,Number($('mins').value)||20)*60;done=false;
+  $('setup').classList.add('hidden');$('result').classList.add('hidden');$('quiz').classList.remove('hidden');
+  showQuestion();updateTimer();clock=setInterval(()=>{seconds--;updateTimer();if(seconds<=0)finish(true);},1000);
+};
+$('prev').onclick=()=>{if(pos>0){pos--;showQuestion();}};
+$('next').onclick=()=>{if(pos<deck.length-1){pos++;showQuestion();}};
+$('submit').onclick=()=>finish(false);
+function updateTimer(){ $('timer').textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;}
+function finish(auto){
+  if(done)return;done=true;clearInterval(clock);
+  let correct=0,wrong=0,blank=0;
+  deck.forEach((q,i)=>{if(answers[i]===null)blank++;else if(answers[i]===q.a)correct++;else wrong++;});
+  const score=correct-wrong*.25;
+  $('quiz').classList.add('hidden');$('result').classList.remove('hidden');
+  let out=`<h2>পরীক্ষার ফলাফল ${auto?'(সময় শেষ)':''}</h2><p><b>মোট নম্বর: ${score.toFixed(2)} / ${deck.length}</b></p><p>সঠিক: ${correct} | ভুল: ${wrong} | উত্তর দাওনি: ${blank}</p><hr><h2>উত্তর পর্যালোচনা</h2>`;
+  deck.forEach((q,i)=>{const ok=answers[i]===q.a;out+=`<p><b>${i+1}. ${escapeHTML(q.q)}</b><br><span class="${ok?'good':'bad'}">${answers[i]===null?'উত্তর দেওয়া হয়নি':ok?'সঠিক':'তোমার উত্তর: '+answers[i]}</span><br>সঠিক উত্তর: ${q.a}. ${escapeHTML(q.o[q.a-1])}</p>`;});
+  out+='<button id="again">আবার পরীক্ষা দাও</button>';
+  $('result').innerHTML=out;$('again').onclick=()=>{ $('result').classList.add('hidden');$('setup').classList.remove('hidden');};
+}
+function escapeHTML(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+</script></body></html>

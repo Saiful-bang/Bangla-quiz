@@ -1,0 +1,11 @@
+{
+  "name": "বাংলা কুইজ",
+  "short_name": "বাংলা কুইজ",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#176b4d",
+  "description": "অফলাইনে বাংলা MCQ অনুশীলনের কুইজ অ্যাপ",
+  "icons": []
+}
